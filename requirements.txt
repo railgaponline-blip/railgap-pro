@@ -4,3 +4,4 @@ razorpay
 selenium
 requests
 certifi
+selenium-stealth
