@@ -23,10 +23,10 @@ from selenium.webdriver.support import expected_conditions as EC
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 # ==========================================
-# 0. SSL BYPASS & CONFIG
+# 0. SSL & SYSTEM CONFIG
 # ==========================================
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-# Monkey patch requests to ignore SSL verify
+# Force SSL Verify False Patch
 original_request = requests.sessions.Session.request
 def patched_request(self, method, url, *args, **kwargs):
     kwargs['verify'] = False
@@ -35,7 +35,7 @@ requests.sessions.Session.request = patched_request
 
 st.set_page_config(page_title="RailGap Pro", page_icon="🚄", layout="centered", initial_sidebar_state="collapsed")
 
-# ⚠️ KEYS (Use TEST keys for now if LIVE is not active)
+# ⚠️ KEYS
 RZP_KEY_ID = "rzp_test_SDIZyfIgzj9y8k"
 RZP_KEY_SECRET = "a8BfGHBFk81I5KVPnjB1jLT7"
 try: client = razorpay.Client(auth=(RZP_KEY_ID, RZP_KEY_SECRET))
@@ -118,65 +118,95 @@ if "payment_id" in qp and "order_id" in qp and "signature" in qp:
     else: st.error("⚠️ Payment Failed."); st.query_params.clear()
 
 # ==========================================
-# 4. BOT ENGINE (STEALTH MODE V97)
+# 4. BOT ENGINE (V98: ANTI-BOT HEADERS)
 # ==========================================
 def run_bot_live(train_no, status_box):
     options = Options()
-    # STEALTH SETTINGS
+    
+    # --- CLOUD CONFIG ---
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
-    options.add_argument("--window-size=1920,1080") # Critical for visibility
-    # FAKE USER AGENT (To fool IRCTC)
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36")
+    options.add_argument("--window-size=1920,1080")
     
+    # --- V98: ANTI-BOT MAGIC (To fool IRCTC) ---
+    # 1. Disable Automation Flags
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    
+    # 2. Fake User Agent (Latest Chrome)
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+
     try:
-        service = Service() # Try Cloud Driver first
+        service = Service()
         driver = webdriver.Chrome(service=service, options=options)
-    except Exception as e_cloud:
-        # Fallback to local
+        
+        # 3. Anti-Detection Script
+        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+    except Exception as e:
         if os.path.exists("chromedriver.exe"):
              service = Service(executable_path="chromedriver.exe")
              driver = webdriver.Chrome(service=service, options=options)
-        else: return f"DRIVER_ERROR: {str(e_cloud)}", [], "ERROR"
+        else: return f"DRIVER_INIT_FAIL: {str(e)}", [], "ERROR"
 
     actions = ActionChains(driver)
 
     try:
-        status_box.update(label="📡 Connecting...", state="running", expanded=True)
-        driver.get("https://www.irctc.co.in/online-charts/"); wait = WebDriverWait(driver, 20) # Increased timeout
-        time.sleep(3) # Wait for page load
+        status_box.update(label="📡 Connecting (Stealth Mode)...", state="running", expanded=True)
+        driver.get("https://www.irctc.co.in/online-charts/")
+        wait = WebDriverWait(driver, 25) # Increased Timeout to 25s
+        time.sleep(5) # Let JS load completely
         
-        # Check Downtime
-        if "downtime" in driver.page_source.lower():
-             driver.delete_all_cookies(); driver.refresh(); time.sleep(3)
-             if "downtime" in driver.page_source.lower(): driver.quit(); return "MAINTENANCE", [], "ERROR"
+        if "downtime" in driver.page_source.lower(): return "MAINTENANCE", [], "ERROR"
 
         status_box.write(f"🚂 Inputting {train_no}...")
         try:
-            # Try finding input - added explicit wait
-            train_input = wait.until(EC.element_to_be_clickable((By.XPATH, "(//input[@type='text'])[1]")))
-            actions.move_to_element(train_input).click().perform(); train_input.clear(); train_input.send_keys(train_no)
-            time.sleep(1); train_input.send_keys(Keys.ARROW_DOWN); train_input.send_keys(Keys.ENTER)
+            # V98 FIX: Use JS Click instead of standard click (Bypasses overlays)
+            train_input = wait.until(EC.presence_of_element_located((By.XPATH, "(//input[@type='text'])[1]")))
+            driver.execute_script("arguments[0].scrollIntoView(true);", train_input)
+            time.sleep(1)
+            driver.execute_script("arguments[0].click();", train_input) # Force JS Click
+            
+            # Send Keys
+            train_input.clear()
+            train_input.send_keys(train_no)
+            time.sleep(2) # Wait for dropdown
+            train_input.send_keys(Keys.ARROW_DOWN)
+            train_input.send_keys(Keys.ENTER)
         except Exception as e: 
-            driver.quit(); return "TRAIN_INPUT_ERROR", [], "ERROR"
+            driver.quit(); return f"TRAIN_INPUT_ERROR (Anti-Bot Blocked): {str(e)}", [], "ERROR"
 
         status_box.write("🚉 Fetching Station...")
         try:
-            inputs = driver.find_elements(By.TAG_NAME, "input"); station_input = [i for i in inputs if i.get_attribute("type") == "text"][-1]
-            actions.move_to_element(station_input).click().perform(); time.sleep(1); station_input.send_keys(Keys.ARROW_DOWN); station_input.send_keys(Keys.ENTER)
+            time.sleep(2)
+            inputs = driver.find_elements(By.TAG_NAME, "input")
+            # Find the last text input which is usually Station
+            station_input = [i for i in inputs if i.get_attribute("type") == "text"][-1]
+            driver.execute_script("arguments[0].click();", station_input) # Force JS Click
+            time.sleep(1)
+            station_input.send_keys(Keys.ARROW_DOWN)
+            station_input.send_keys(Keys.ENTER)
         except: return "STATION_INPUT_ERROR", [], "ERROR"
 
-        status_box.write("📂 Checking Chart..."); time.sleep(1); driver.execute_script("let btns = document.querySelectorAll('button'); btns[btns.length-1].click();")
+        status_box.write("📂 Checking Chart...")
+        time.sleep(2)
+        driver.execute_script("let btns = document.querySelectorAll('button'); btns[btns.length-1].click();")
+        
         chart_loaded = False
-        for _ in range(40):
-            time.sleep(1); btns = driver.find_elements(By.TAG_NAME, "button")
-            if any(re.match(r'^[A-Z]{1,2}[0-9]{1,2}$', b.text.strip()) for b in btns if b.is_displayed()): chart_loaded = True; break
+        for _ in range(50): # Wait up to 50 seconds
+            time.sleep(1)
+            btns = driver.find_elements(By.TAG_NAME, "button")
+            if any(re.match(r'^[A-Z]{1,2}[0-9]{1,2}$', b.text.strip()) for b in btns if b.is_displayed()): 
+                chart_loaded = True; break
         
         if not chart_loaded:
-            if "chart not prepared" in driver.page_source.lower(): driver.quit(); return "CHART_NOT_PREPARED", [], "NOT_PREPARED"
-            driver.quit(); return "NO_DATA", [], "ERROR"
+            src = driver.page_source.lower()
+            if "chart not prepared" in src: driver.quit(); return "CHART_NOT_PREPARED", [], "NOT_PREPARED"
+            if "invalid train" in src: driver.quit(); return "INVALID_TRAIN", [], "ERROR"
+            driver.quit(); return "NO_DATA (Timeout)", [], "ERROR"
 
     except Exception as e: driver.quit(); return f"CRASH: {str(e)}", [], "ERROR"
 
@@ -241,7 +271,7 @@ if search and len(train_no) > 4:
             res_type, fresh_data, chart_status = run_bot_live(train_no, status)
             if res_type == "SUCCESS": save_to_cache(train_no, fresh_data, "PREPARED"); st.session_state['data'] = fresh_data; st.session_state['chart_status'] = "PREPARED"; st.rerun()
             elif res_type == "CHART_NOT_PREPARED": st.warning("⚠️ Chart Not Prepared Yet"); save_to_cache(train_no, [], "NOT_PREPARED")
-            else: st.error(f"❌ Search Failed: {res_type}") # Shows exact error now
+            else: st.error(f"❌ {res_type}")
 
 if 'data' in st.session_state and st.session_state.get('chart_status') == "PREPARED":
     df = pd.DataFrame(st.session_state['data'])
