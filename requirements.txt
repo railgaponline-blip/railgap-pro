@@ -1,0 +1,6 @@
+streamlit
+pandas
+razorpay
+selenium
+requests
+certifi
