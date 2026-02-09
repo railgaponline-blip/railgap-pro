@@ -20,13 +20,13 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium_stealth import stealth # NEW LIBRARY
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 # ==========================================
-# 0. SSL & SYSTEM CONFIG
+# 0. SSL & CONFIG
 # ==========================================
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-# Force SSL Verify False Patch
 original_request = requests.sessions.Session.request
 def patched_request(self, method, url, *args, **kwargs):
     kwargs['verify'] = False
@@ -118,85 +118,96 @@ if "payment_id" in qp and "order_id" in qp and "signature" in qp:
     else: st.error("⚠️ Payment Failed."); st.query_params.clear()
 
 # ==========================================
-# 4. BOT ENGINE (V98: ANTI-BOT HEADERS)
+# 4. BOT ENGINE (V99: STEALTH + DEBUG)
 # ==========================================
 def run_bot_live(train_no, status_box):
     options = Options()
-    
-    # --- CLOUD CONFIG ---
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     
-    # --- V98: ANTI-BOT MAGIC (To fool IRCTC) ---
-    # 1. Disable Automation Flags
+    # Base anti-bot args
     options.add_argument("--disable-blink-features=AutomationControlled")
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option("useAutomationExtension", False)
-    
-    # 2. Fake User Agent (Latest Chrome)
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
     try:
         service = Service()
         driver = webdriver.Chrome(service=service, options=options)
         
-        # 3. Anti-Detection Script
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        # --- THE MAGIC MASK (Selenium Stealth) ---
+        stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
         
     except Exception as e:
         if os.path.exists("chromedriver.exe"):
              service = Service(executable_path="chromedriver.exe")
              driver = webdriver.Chrome(service=service, options=options)
-        else: return f"DRIVER_INIT_FAIL: {str(e)}", [], "ERROR"
+             # Apply stealth locally too
+             stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
+        else: return f"INIT_FAIL: {str(e)}", [], "ERROR"
 
     actions = ActionChains(driver)
 
     try:
-        status_box.update(label="📡 Connecting (Stealth Mode)...", state="running", expanded=True)
+        status_box.update(label="📡 Stealth Connect...", state="running", expanded=True)
         driver.get("https://www.irctc.co.in/online-charts/")
-        wait = WebDriverWait(driver, 25) # Increased Timeout to 25s
-        time.sleep(5) # Let JS load completely
-        
+        wait = WebDriverWait(driver, 20)
+        time.sleep(5) # Allow full load
+
         if "downtime" in driver.page_source.lower(): return "MAINTENANCE", [], "ERROR"
 
         status_box.write(f"🚂 Inputting {train_no}...")
         try:
-            # V98 FIX: Use JS Click instead of standard click (Bypasses overlays)
-            train_input = wait.until(EC.presence_of_element_located((By.XPATH, "(//input[@type='text'])[1]")))
+            # Attempt to find input
+            train_input = wait.until(EC.element_to_be_clickable((By.XPATH, "(//input[@type='text'])[1]")))
+            
+            # Human-like interaction
             driver.execute_script("arguments[0].scrollIntoView(true);", train_input)
             time.sleep(1)
-            driver.execute_script("arguments[0].click();", train_input) # Force JS Click
-            
-            # Send Keys
+            train_input.click() # Standard click first
+            time.sleep(0.5)
             train_input.clear()
-            train_input.send_keys(train_no)
-            time.sleep(2) # Wait for dropdown
+            for digit in train_no:
+                train_input.send_keys(digit)
+                time.sleep(0.1) # Type like human
+            
+            time.sleep(2) # Wait for suggestions
             train_input.send_keys(Keys.ARROW_DOWN)
             train_input.send_keys(Keys.ENTER)
-        except Exception as e: 
-            driver.quit(); return f"TRAIN_INPUT_ERROR (Anti-Bot Blocked): {str(e)}", [], "ERROR"
+            
+        except Exception as e:
+            # --- DEBUGGER: TAKE SCREENSHOT ON ERROR ---
+            driver.save_screenshot("debug_error.png")
+            st.image("debug_error.png", caption="What the bot sees (Error)")
+            driver.quit()
+            return f"INPUT_BLOCK: {str(e)}", [], "ERROR"
 
         status_box.write("🚉 Fetching Station...")
         try:
             time.sleep(2)
             inputs = driver.find_elements(By.TAG_NAME, "input")
-            # Find the last text input which is usually Station
             station_input = [i for i in inputs if i.get_attribute("type") == "text"][-1]
-            driver.execute_script("arguments[0].click();", station_input) # Force JS Click
-            time.sleep(1)
+            station_input.click()
+            time.sleep(0.5)
             station_input.send_keys(Keys.ARROW_DOWN)
             station_input.send_keys(Keys.ENTER)
-        except: return "STATION_INPUT_ERROR", [], "ERROR"
+        except: return "STATION_FAIL", [], "ERROR"
 
         status_box.write("📂 Checking Chart...")
         time.sleep(2)
         driver.execute_script("let btns = document.querySelectorAll('button'); btns[btns.length-1].click();")
         
         chart_loaded = False
-        for _ in range(50): # Wait up to 50 seconds
+        for _ in range(50):
             time.sleep(1)
             btns = driver.find_elements(By.TAG_NAME, "button")
             if any(re.match(r'^[A-Z]{1,2}[0-9]{1,2}$', b.text.strip()) for b in btns if b.is_displayed()): 
@@ -205,8 +216,9 @@ def run_bot_live(train_no, status_box):
         if not chart_loaded:
             src = driver.page_source.lower()
             if "chart not prepared" in src: driver.quit(); return "CHART_NOT_PREPARED", [], "NOT_PREPARED"
-            if "invalid train" in src: driver.quit(); return "INVALID_TRAIN", [], "ERROR"
-            driver.quit(); return "NO_DATA (Timeout)", [], "ERROR"
+            driver.save_screenshot("chart_error.png")
+            st.image("chart_error.png", caption="Chart Load Failed")
+            driver.quit(); return "NO_DATA", [], "ERROR"
 
     except Exception as e: driver.quit(); return f"CRASH: {str(e)}", [], "ERROR"
 
