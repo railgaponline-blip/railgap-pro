@@ -1,3 +1,4 @@
+from webdriver_manager.chrome import ChromeDriverManager
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -140,9 +141,20 @@ def run_bot_live(train_no, status_box):
     options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
     
     try:
-        service = Service()
+        # VPS FIX: Use ChromeDriverManager
+        service = Service(ChromeDriverManager().install())
         driver = webdriver.Chrome(service=service, options=options)
-        
+
+        # Apply Stealth
+        stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
+                
         # Apply Stealth
         stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
         
@@ -303,4 +315,5 @@ if 'data' in st.session_state and st.session_state.get('chart_status') == "PREPA
         teaser_df = df[['Coach', 'Seat', 'Type', 'Route']].head(10); teaser_html = teaser_df.to_html(index=False, classes='blur-table', border=0)
         st.markdown(f'<div class="blur-container">{teaser_html}</div>', unsafe_allow_html=True)
     else:
+
         st.success("✅ Unlocked"); coaches = sorted(df['Coach'].unique()); sel_coach = st.selectbox("Filter", ["All"] + coaches); view_df = df if sel_coach == "All" else df[df['Coach'] == sel_coach]; st.dataframe(view_df[['Coach', 'Seat', 'Type', 'Route']], use_container_width=True, hide_index=True); csv = view_df.to_csv(index=False).encode('utf-8'); st.download_button("📥 Download CSV", csv, "seats.csv", "text/csv")
