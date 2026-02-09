@@ -20,11 +20,11 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium_stealth import stealth # NEW LIBRARY
+from selenium_stealth import stealth
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 # ==========================================
-# 0. SSL & CONFIG
+# 0. CONFIG
 # ==========================================
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 original_request = requests.sessions.Session.request
@@ -118,78 +118,77 @@ if "payment_id" in qp and "order_id" in qp and "signature" in qp:
     else: st.error("⚠️ Payment Failed."); st.query_params.clear()
 
 # ==========================================
-# 4. BOT ENGINE (V99: STEALTH + DEBUG)
+# 4. BOT ENGINE (V100: PROTOCOL FIX)
 # ==========================================
 def run_bot_live(train_no, status_box):
     options = Options()
+    
+    # --- PROTOCOL BYPASS SETTINGS ---
+    options.add_argument("--disable-http2") # Critical Fix for ERR_HTTP2_PROTOCOL_ERROR
+    options.add_argument("--ignore-certificate-errors")
+    options.add_argument("--allow-running-insecure-content")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    
+    # Standard Cloud Settings
     options.add_argument("--headless") 
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     
-    # Base anti-bot args
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
-
+    # Evasion Headers
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    
     try:
         service = Service()
         driver = webdriver.Chrome(service=service, options=options)
         
-        # --- THE MAGIC MASK (Selenium Stealth) ---
-        stealth(driver,
-            languages=["en-US", "en"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True,
-        )
+        # Apply Stealth
+        stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
         
     except Exception as e:
         if os.path.exists("chromedriver.exe"):
              service = Service(executable_path="chromedriver.exe")
              driver = webdriver.Chrome(service=service, options=options)
-             # Apply stealth locally too
              stealth(driver, languages=["en-US", "en"], vendor="Google Inc.", platform="Win32", webgl_vendor="Intel Inc.", renderer="Intel Iris OpenGL Engine", fix_hairline=True)
         else: return f"INIT_FAIL: {str(e)}", [], "ERROR"
 
     actions = ActionChains(driver)
 
     try:
-        status_box.update(label="📡 Stealth Connect...", state="running", expanded=True)
+        status_box.update(label="📡 Secure Connecting...", state="running", expanded=True)
         driver.get("https://www.irctc.co.in/online-charts/")
-        wait = WebDriverWait(driver, 20)
-        time.sleep(5) # Allow full load
+        wait = WebDriverWait(driver, 30)
+        time.sleep(5) 
 
+        # --- DEBUG: CHECK PAGE TITLE/SOURCE ---
         if "downtime" in driver.page_source.lower(): return "MAINTENANCE", [], "ERROR"
 
         status_box.write(f"🚂 Inputting {train_no}...")
         try:
-            # Attempt to find input
+            # Force Wait for Input
             train_input = wait.until(EC.element_to_be_clickable((By.XPATH, "(//input[@type='text'])[1]")))
             
-            # Human-like interaction
+            # JS Interaction (Safer)
             driver.execute_script("arguments[0].scrollIntoView(true);", train_input)
             time.sleep(1)
-            train_input.click() # Standard click first
+            train_input.click()
             time.sleep(0.5)
             train_input.clear()
-            for digit in train_no:
-                train_input.send_keys(digit)
-                time.sleep(0.1) # Type like human
             
-            time.sleep(2) # Wait for suggestions
+            # Slow Typing
+            for char in train_no:
+                train_input.send_keys(char)
+                time.sleep(0.15)
+                
+            time.sleep(2)
             train_input.send_keys(Keys.ARROW_DOWN)
             train_input.send_keys(Keys.ENTER)
             
         except Exception as e:
-            # --- DEBUGGER: TAKE SCREENSHOT ON ERROR ---
-            driver.save_screenshot("debug_error.png")
-            st.image("debug_error.png", caption="What the bot sees (Error)")
-            driver.quit()
-            return f"INPUT_BLOCK: {str(e)}", [], "ERROR"
+            driver.save_screenshot("debug_error.png") # Capture Screenshot
+            st.image("debug_error.png", caption="Error View")
+            driver.quit(); return f"INPUT_BLOCK: {str(e)}", [], "ERROR"
 
         status_box.write("🚉 Fetching Station...")
         try:
@@ -292,7 +291,6 @@ if 'data' in st.session_state and st.session_state.get('chart_status') == "PREPA
         def update_mobile(): st.session_state['mobile'] = st.session_state.temp_mobile
         st.text_input("Enter Mobile Number", key="temp_mobile", on_change=update_mobile, max_chars=10, placeholder="9876543210")
         current_mob = st.session_state.get('mobile', "")
-        
         if len(current_mob) == 10:
             try:
                 order = client.order.create({"amount": 1900, "currency": "INR", "receipt": f"rcpt_{int(time.time())}"})
@@ -302,7 +300,6 @@ if 'data' in st.session_state and st.session_state.get('chart_status') == "PREPA
                 """
                 components.html(payment_html, height=650)
             except Exception as e: st.error(f"⚠️ Payment Error: {str(e)}")
-        
         teaser_df = df[['Coach', 'Seat', 'Type', 'Route']].head(10); teaser_html = teaser_df.to_html(index=False, classes='blur-table', border=0)
         st.markdown(f'<div class="blur-container">{teaser_html}</div>', unsafe_allow_html=True)
     else:
